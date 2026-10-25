@@ -1,0 +1,20 @@
+---
+description: How a book strategy is coded and how its backtest report is shown
+alwaysApply: true
+---
+
+# Strategy desk
+
+Follow `CONTEXT.md`. The app is a bank of book strategies and one saved backtest report per strategy. The pages are Bank, Code, and Indicators. Indicators studies the catalog in `indicators.json`. It does not run a backtest or build a signal.
+
+A new strategy is a `Strategy` subclass in `strategies/<key>.py` with stages `filter`, `buy`, `sell`, `size` (and `stop` when the exit uses one), `cost_params` from `engine.book.COST_PARAMS`, and a `param_space` that also includes capital, position cap, risk per ATR, stop distance, partial stop percent, and entry rank.
+
+`signals(bars, params)` returns `entry`, `exit`, and `atr` on the bar index. `entry` is already filtered. Fills are the next open. Optional `udr` and `spread_atr` rank same-morning buys.
+
+`indicator_frame` returns the series the chart draws and a kind of `overlay` or `oscillator` for each. Overlay names sit on the candles. Oscillator names get their own panel. The legend is the column name. Carry higher-timeframe values forward from the completed bar.
+
+The backtest runs on the whole adjusted Nifty 500 and studies every book strategy, including one added later. Indicator parameters are chosen on the first 70% of sessions, using folds inside that window, and that choice is the strategy's parameter set. The last 30% is scored once and does not change parameters. Capital, costs, the stop, and entry rank stay at the file defaults. The report opens with a switch between those windows and names the train dates and the test dates. The charts, the performance dashboard, the portfolio value, and the trades follow the selected window, and that window's dates stay with its charts and its performance. Holds means the test ratio is at least 75% of a positive train ratio.
+
+Charts are inside the report. They step through names that traded in the selected window. Swipe left or right, or use previous and next. Train buys are green, test buys are blue, sells point down. The test window is shaded.
+
+Do not add a backtest button, sample or fold controls, a one-symbol lab, a rule builder, or a separate charts page. The indicator search runs when the report is built, not from the bank. The bank displays saved reports. The Indicators page only explains the stored catalog.

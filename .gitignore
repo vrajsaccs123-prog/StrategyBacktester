@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+data/bank.sqlite
+data/uploads/*
+!data/uploads/.gitkeep
+.streamlit/secrets.toml
+nse500/daily-ohlcv/raw/bhavcopy/
+nse500/daily-ohlcv/adjusted/unadjusted_ohlcv.parquet
