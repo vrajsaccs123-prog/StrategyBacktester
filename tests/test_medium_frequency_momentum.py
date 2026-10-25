@@ -438,10 +438,18 @@ def test_discover_loads_the_book_strategy():
 
     books = [item for item in discover() if item.stages]
     assert [item.key for item in books] == [
+        "s01_trend_core",
+        "s08_momentum_rotation",
+        "s02_donchian_volume_breakout",
         "ema_crossover",
+        "s07_ichimoku_trend",
+        "s04_macd_supertrend_swing",
         "medium_frequency_momentum",
         "medium_frequency_momentum_no_stop",
         "momentum_sleeve",
+        "s05_bollinger_range_reversion",
+        "s03_uptrend_pullback",
+        "s06_squeeze_breakout",
         "weekly_drop",
         "weekly_trend_breakout",
     ]

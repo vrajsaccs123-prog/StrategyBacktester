@@ -117,6 +117,9 @@ class _Order:
     atr: float
     udr: float
     spread_atr: float
+    size: float = 1.0
+    stop_pad: float = float("nan")
+    stop_price: float = float("nan")
 
 
 @dataclass
@@ -145,6 +148,9 @@ class _Book:
     atr: np.ndarray
     udr: np.ndarray
     spread: np.ndarray
+    size: np.ndarray
+    stop_pad: np.ndarray
+    stop_price: np.ndarray
 
 
 def _books(bars_by_symbol: dict[str, pd.DataFrame], signals_by_symbol: dict[str, pd.DataFrame]) -> dict[str, _Book]:
@@ -158,6 +164,7 @@ def _books(bars_by_symbol: dict[str, pd.DataFrame], signals_by_symbol: dict[str,
         signal = signal.reindex(bars.index)
         entry = signal["entry"].fillna(False).to_numpy(dtype=bool) if "entry" in signal else np.zeros(len(bars), dtype=bool)
         exit_ = signal["exit"].fillna(False).to_numpy(dtype=bool) if "exit" in signal else np.zeros(len(bars), dtype=bool)
+        blank = np.full(len(bars), np.nan)
         books[symbol] = _Book(
             index=bars.index,
             loc={pd.Timestamp(ts): i for i, ts in enumerate(bars.index)},
@@ -170,8 +177,24 @@ def _books(bars_by_symbol: dict[str, pd.DataFrame], signals_by_symbol: dict[str,
             atr=signal["atr"].to_numpy(dtype=float) if "atr" in signal else np.full(len(bars), np.nan),
             udr=signal["udr"].to_numpy(dtype=float) if "udr" in signal else np.full(len(bars), np.nan),
             spread=signal["spread_atr"].to_numpy(dtype=float) if "spread_atr" in signal else np.full(len(bars), np.nan),
+            size=signal["size"].to_numpy(dtype=float) if "size" in signal else blank,
+            stop_pad=signal["stop_pad"].to_numpy(dtype=float) if "stop_pad" in signal else blank,
+            stop_price=signal["stop_price"].to_numpy(dtype=float) if "stop_price" in signal else blank,
         )
     return books
+
+
+def _order(kind: str, day: pd.Timestamp, book: _Book, loc: int) -> _Order:
+    return _Order(
+        kind,
+        day,
+        float(book.atr[loc]),
+        float(book.udr[loc]),
+        float(book.spread[loc]),
+        float(book.size[loc]),
+        float(book.stop_pad[loc]),
+        float(book.stop_price[loc]),
+    )
 
 
 def _rank_key(symbol: str, order: _Order, mode: int):
@@ -286,12 +309,24 @@ def simulate(
         price = float(book.open[loc]) * (1 + slip)
         if not math.isfinite(price) or price <= 0:
             return
+        limit = int(params.get("max_positions") or 0)
+        if limit > 0 and sum(pos.shares > 0 for pos in positions.values()) >= limit:
+            return
+        size_mult = float(order.size)
+        if math.isfinite(size_mult) and size_mult <= 0:
+            return
+        if not math.isfinite(size_mult):
+            size_mult = 1.0
         # Portfolio / 20, times the strategy's size factor, then divided by ATR.
         unit = portfolio_value(day) / 20.0 * float(params["risk_per_atr"])
         if not math.isfinite(unit) or unit <= 0:
             return
-        risk_shares = int(math.floor(unit / atr_value))
+        risk_shares = int(math.floor(unit / atr_value * size_mult))
         cap_shares = int(math.floor(float(params["max_position_inr"]) / price))
+        position_pct = float(params.get("max_position_pct") or 0)
+        if position_pct > 0:
+            room = portfolio_value(day) * position_pct / 100.0
+            cap_shares = min(cap_shares, int(math.floor(room / price)))
         shares = min(risk_shares, cap_shares, affordable_shares(cash, price, params))
         if shares < 1:
             return
@@ -299,12 +334,21 @@ def simulate(
         cost = share_charges(notional, "buy", params)
         if notional + cost > cash + 1e-6:
             return
-        cash -= notional + cost
-        stop_pct = float(params.get("stop_pct", 0) or 0)
-        if stop_pct > 0:
-            stop = price * (1.0 - stop_pct / 100.0)
+        level = float(order.stop_price)
+        pad = float(order.stop_pad)
+        if math.isfinite(level) and level > 0:
+            if level >= price:
+                return
+            stop = level
+        elif math.isfinite(pad) and pad > 0:
+            stop = price - pad
         else:
-            stop = price - float(params["stop_atr"]) * atr_value
+            stop_pct = float(params.get("stop_pct", 0) or 0)
+            if stop_pct > 0:
+                stop = price * (1.0 - stop_pct / 100.0)
+            else:
+                stop = price - float(params["stop_atr"]) * atr_value
+        cash -= notional + cost
         positions[symbol] = _Position(
             symbol=symbol,
             entry_time=day,
@@ -380,15 +424,12 @@ def simulate(
             if loc is None:
                 continue
             held = symbol in positions
-            atr_value = float(book.atr[loc])
-            udr = float(book.udr[loc])
-            spread = float(book.spread[loc])
             if book.exit[loc] and held:
-                orders[symbol] = _Order("exit", day, atr_value, udr, spread)
+                orders[symbol] = _order("exit", day, book, loc)
                 if book.entry[loc]:
-                    reentries[symbol] = _Order("entry", day, atr_value, udr, spread)
+                    reentries[symbol] = _order("entry", day, book, loc)
             elif book.entry[loc] and not held:
-                orders[symbol] = _Order("entry", day, atr_value, udr, spread)
+                orders[symbol] = _order("entry", day, book, loc)
 
         total = cash
         open_names = 0
