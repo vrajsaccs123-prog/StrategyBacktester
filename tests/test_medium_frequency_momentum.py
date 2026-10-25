@@ -441,6 +441,7 @@ def test_discover_loads_the_book_strategy():
         "ema_crossover",
         "medium_frequency_momentum",
         "medium_frequency_momentum_no_stop",
+        "momentum_sleeve",
         "weekly_drop",
         "weekly_trend_breakout",
     ]
