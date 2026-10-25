@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from engine.metrics import METRIC_LABELS, format_metric
+from engine.metrics import METRIC_LABELS, MONTHS, format_drawdown_days, format_metric
 from engine.models import BacktestResult, CompletedRun
 
 CHART_RANGES = ("Day", "Week", "Month", "Quarter", "Year")
@@ -305,6 +305,108 @@ def equity_line_figure(result: BacktestResult, title: str = "Portfolio value", c
     return figure
 
 
+def rolling_return_figure(series: pd.Series, title: str, color: str = "#1d4ed8") -> go.Figure:
+    """Trailing or all-time return for the selected window."""
+
+    figure = go.Figure()
+    if series is not None and len(series):
+        fill = "rgba(29, 78, 216, 0.12)" if color == "#1d4ed8" else "rgba(68, 64, 60, 0.12)"
+        figure.add_trace(
+            go.Scatter(
+                x=series.index,
+                y=series.to_numpy(dtype=float),
+                name="Return",
+                mode="lines",
+                line=dict(color=color, width=2),
+                fill="tozeroy",
+                fillcolor=fill,
+                hovertemplate="%{x|%d %b %Y}<br>%{y:.2%}<extra>Return</extra>",
+            )
+        )
+        figure.add_hline(y=0, line_width=1, line_color="#a8a29e")
+    figure.update_layout(
+        title=title,
+        height=360,
+        margin=dict(l=48, r=16, t=40, b=24),
+        yaxis_title="Return",
+        legend_orientation="h",
+        dragmode="zoom",
+        hovermode="x unified",
+        uirevision=title,
+    )
+    figure.update_xaxes(fixedrange=False)
+    figure.update_yaxes(fixedrange=False, tickformat=".0%")
+    return figure
+
+
+def _mix(start: str, end: str, tone: float) -> str:
+    def parts(color: str) -> tuple[int, int, int]:
+        color = color.lstrip("#")
+        return tuple(int(color[index : index + 2], 16) for index in (0, 2, 4))
+
+    origin = parts(start)
+    target = parts(end)
+    mixed = tuple(round(origin[index] + (target[index] - origin[index]) * tone) for index in range(3))
+    return "#{:02x}{:02x}{:02x}".format(*mixed)
+
+
+def _heat_colors(value: float) -> tuple[str, str]:
+    cap = 0.10
+    if value > 0:
+        tone = min(value / cap, 1.0)
+        background = _mix("#dcfce7", "#15803d", tone)
+        foreground = "#f0fdf4" if tone >= 0.55 else "#14532d"
+    elif value < 0:
+        tone = min(abs(value) / cap, 1.0)
+        background = _mix("#fee2e2", "#dc2626", tone)
+        foreground = "#fef2f2" if tone >= 0.55 else "#7f1d1d"
+    else:
+        background, foreground = "#f5f5f4", "#44403c"
+    return background, foreground
+
+
+def _heat_css(value, edge: bool = False) -> str:
+    if pd.isna(value):
+        css = "background-color: #fafaf9"
+    else:
+        background, foreground = _heat_colors(float(value))
+        css = f"background-color: {background}; color: {foreground}"
+    if edge:
+        css += "; font-weight: 700; border-left: 2px solid #a8a29e"
+    return css
+
+
+def style_monthly_returns(table: pd.DataFrame):
+    """Green cells for gains and red cells for losses. The year is the last column."""
+
+    view = table.copy()
+    view.index = [str(int(year)) for year in view.index]
+    view.index.name = None
+    return (
+        view.style.format("{:.1%}", na_rep="")
+        .map(lambda value: _heat_css(value), subset=MONTHS)
+        .map(lambda value: _heat_css(value, edge=True), subset=["Year"])
+    )
+
+
+def monthly_returns_html(table: pd.DataFrame) -> str:
+    """A scrollable heatmap. Narrow windows can move sideways to the year column."""
+
+    inner = style_monthly_returns(table).to_html()
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  html, body {{ margin: 0; padding: 0; background: transparent; color: #1c1917; font-family: "Source Sans Pro", sans-serif; }}
+  .wrap {{ overflow-x: auto; }}
+  table {{ border-collapse: collapse; font-size: 0.82rem; min-width: 760px; width: 100%; font-variant-numeric: tabular-nums; }}
+  th, td {{ border: 1px solid #e7e5e4; padding: 0.35rem 0.45rem; text-align: right; white-space: nowrap; }}
+  thead th {{ background: #f5f5f4; font-weight: 600; }}
+  tbody th {{ background: #fafaf9; text-align: left; font-weight: 600; position: sticky; left: 0; z-index: 1; }}
+  thead th:first-child {{ position: sticky; left: 0; z-index: 2; }}
+</style></head>
+<body><div class="wrap">{inner}</div></body></html>"""
+
+
 def drawdown_figure(result: BacktestResult) -> go.Figure:
     figure = go.Figure()
     figure.add_trace(
@@ -486,8 +588,13 @@ def report_figures(run: CompletedRun, bars: pd.DataFrame | None, bar_range: str 
 
 
 def report_html(title: str, run: CompletedRun, bars: pd.DataFrame | None, subtitle: str = "", bar_range: str = "Day") -> str:
+    def _shown(key: str) -> str:
+        if key == "drawdown_days":
+            return format_drawdown_days(run.metrics)
+        return format_metric(key, run.metrics[key])
+
     rows = "".join(
-        f"<tr><td>{html.escape(METRIC_LABELS[key])}</td><td>{html.escape(format_metric(key, run.metrics[key]))}</td></tr>"
+        f"<tr><td>{html.escape(METRIC_LABELS[key])}</td><td>{html.escape(_shown(key))}</td></tr>"
         for key in METRIC_LABELS
         if key in run.metrics
     )

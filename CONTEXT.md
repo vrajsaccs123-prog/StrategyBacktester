@@ -54,7 +54,9 @@ The report opens on the test window and names the train dates and the test dates
 - Weak: neither window pays for its drawdown.
 - Test only: the test window is positive and the train window is not. That is not a confirmed edge.
 
-The charts come next. Then the dashboard for the selected window: CAGR, absolute return, investment, closing amount, winning trades, losing trades, average winning-trade return, average losing-trade return, max drawdown, Sortino, Sharpe, and the annualized standard deviation of daily returns.
+The charts come next. Then the dashboard for the selected window: CAGR, absolute return, investment, closing amount, winning trades, losing trades, average winning-trade return, average losing-trade return, average calendar days a trade stays open, max drawdown, drawdown days, Sortino, Sharpe, and the annualized standard deviation of daily returns. Drawdown days are the calendar days from the max-drawdown low until portfolio value regained the peak before that decline. If it has not regained that peak, the count stays open.
+
+Under those figures, a rolling-return chart. A switch selects 1 year, 3 years, 5 years, 7 years, 10 years, or all time. A fixed span is the annualized return over the previous span, and the line starts once the selected window contains that span. All time is the return from the first day of the selected window to each date. Under the chart, a table of monthly returns with the year's return in the last column. A gain is green and a loss is red.
 
 Under the dashboard, portfolio value through time. Under that curve, the five most recent closed trades in the selected window, and a collapsible list of every closed trade in that window. The locked parameters stay at the bottom. Indicator settings chosen on the train window are marked as the train choice. The rest are marked as the file values. Do not show a search, a forest, fold scores, or sample tables.
 

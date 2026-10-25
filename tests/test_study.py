@@ -21,7 +21,8 @@ from engine.forest import (
     window_dates,
 )
 from engine.models import BacktestResult, BacktestSettings, ParamSpec
-from engine.report import equity_line_figure, symbol_price_figure
+from engine.metrics import monthly_returns
+from engine.report import equity_line_figure, monthly_returns_html, rolling_return_figure, style_monthly_returns, symbol_price_figure
 from engine.strategy import Stage, Strategy
 from strategies.ema_crossover import EmaCrossover
 from strategies.medium_frequency_momentum import MediumFrequencyMomentum
@@ -320,3 +321,24 @@ def test_portfolio_value_is_a_line():
     assert figure.layout.title.text == "Test portfolio value"
     assert figure.data[0].name == "Portfolio"
     assert list(figure.data[0].y) == [100.0, 110.0, 105.0, 120.0]
+
+
+def test_rolling_return_and_monthly_heatmap():
+    series = pd.Series([0.10, -0.05], index=pd.to_datetime(["2020-01-02", "2020-06-01"]))
+    figure = rolling_return_figure(series, title="Test · 1 year", color="#1d4ed8")
+    assert figure.layout.title.text == "Test · 1 year"
+    assert figure.layout.yaxis.tickformat == ".0%"
+    assert list(figure.data[0].y) == [0.10, -0.05]
+    path = pd.Series(
+        [100.0, 110.0, 99.0],
+        index=pd.to_datetime(["2020-01-02", "2020-01-31", "2020-02-28"]),
+    )
+    rendered = style_monthly_returns(monthly_returns(path)).to_html()
+    assert "10.0%" in rendered
+    assert "background-color: #15803d" in rendered
+    assert "-10.0%" in rendered
+    assert "background-color: #dc2626" in rendered
+    page = monthly_returns_html(monthly_returns(path))
+    assert "overflow-x: auto" in page
+    assert "position: sticky" in page
+    assert "10.0%" in page

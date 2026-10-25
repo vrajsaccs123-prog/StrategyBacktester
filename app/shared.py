@@ -15,8 +15,8 @@ if str(ROOT) not in sys.path:
 
 from engine.book import param_label
 from engine.forest import StudyResult, calendar, tagged_trades, window_dates
-from engine.metrics import compute_metrics, format_metric
-from engine.report import CHART_RANGES, PLOTLY_CONFIG, equity_line_figure, symbol_price_figure
+from engine.metrics import ROLLING_WINDOWS, compute_metrics, format_drawdown_days, format_metric, monthly_returns, rolling_returns
+from engine.report import CHART_RANGES, PLOTLY_CONFIG, equity_line_figure, monthly_returns_html, rolling_return_figure, symbol_price_figure
 from engine.strategy import Strategy, resolve_params
 from strategies.registry import discover
 
@@ -31,7 +31,9 @@ WINDOW_STATS = (
     ("loss_count", "Losing trades"),
     ("avg_win_return", "Avg winning return"),
     ("avg_loss_return", "Avg losing return"),
+    ("avg_hold_days", "Avg days in trade"),
     ("max_drawdown", "Max drawdown"),
+    ("drawdown_days", "Drawdown days"),
     ("sortino", "Sortino"),
     ("sharpe", "Sharpe"),
     ("volatility", "Standard deviation"),
@@ -205,9 +207,17 @@ def render_dashboard(study: StudyResult) -> None:
     if result.equity is None or result.equity.empty:
         st.write("This window has no portfolio value.")
     else:
-        _window_dashboard(compute_metrics(result))
-        st.caption("Standard deviation is the annualized volatility of daily portfolio returns.")
+        metrics = compute_metrics(result)
+        _window_dashboard(metrics)
+        st.caption(
+            "Drawdown days count calendar days from the max-drawdown low until the portfolio regains the peak from before that decline. "
+            "An open count has not regained that peak. "
+            "Average days in a trade are calendar days from the entry fill to the exit fill. "
+            "Standard deviation is the annualized volatility of daily portfolio returns."
+        )
         color = "#1d4ed8" if window == "Test" else "#44403c"
+        _rolling_section(result, window, study.strategy_key, color)
+        _monthly_section(result)
         show_chart(equity_line_figure(result, title=f"{window} portfolio value", color=color))
 
     _trade_section(_window_trades(study, window))
@@ -226,7 +236,50 @@ def _window_dashboard(metrics: dict) -> None:
     for start in range(0, len(WINDOW_STATS), 4):
         columns = st.columns(4)
         for column, (key, label) in zip(columns, WINDOW_STATS[start : start + 4]):
-            column.metric(label, format_metric(key, metrics.get(key)))
+            if key == "drawdown_days":
+                shown = format_drawdown_days(metrics)
+            else:
+                shown = format_metric(key, metrics.get(key))
+            column.metric(label, shown)
+
+
+def _rolling_section(result, window: str, strategy_key: str, color: str) -> None:
+    st.markdown("**Rolling return**")
+    labels = [label for label, _ in ROLLING_WINDOWS]
+    choice = st.segmented_control(
+        "Rolling return horizon",
+        labels,
+        default="1 year",
+        key=f"rolling_return_{strategy_key}_{window.lower()}",
+        required=True,
+        label_visibility="collapsed",
+        width="stretch",
+        wrap=True,
+    )
+    years = dict(ROLLING_WINDOWS)[choice]
+    series = rolling_returns(result.equity["equity"], years)
+    if years is None:
+        st.caption("Each point is the return from the first day of this window.")
+    else:
+        st.caption(
+            f"Each point is the annualized return over the previous {choice}. "
+            f"The line starts once this window contains {choice}."
+        )
+    if series.empty:
+        st.write(f"This window is shorter than {choice}, so there is no rolling return for that span.")
+        return
+    title = f"{window} · all-time return" if years is None else f"{window} · {choice} rolling return"
+    show_chart(rolling_return_figure(series, title=title, color=color))
+
+
+def _monthly_section(result) -> None:
+    st.markdown("**Monthly returns**")
+    st.caption("Each cell is the change in portfolio value that month. The last column is the change for that year. Green is a gain. Red is a loss.")
+    table = monthly_returns(result.equity["equity"])
+    if table.empty:
+        st.write("No monthly returns in this window.")
+        return
+    st.iframe(monthly_returns_html(table), height=34 * (len(table) + 1) + 18)
 
 
 def _window_trades(study: StudyResult, window: str) -> pd.DataFrame:

@@ -13,7 +13,15 @@ from engine.backtest import run_backtest
 from engine.data import load_csv
 from engine.catalog import load_catalog
 from engine.indicators import INDICATOR_DEFS, atr, compute_indicator, engine_for_catalog, rsi, sma
-from engine.metrics import compute_metrics
+from engine.metrics import (
+    average_hold_days,
+    compute_metrics,
+    drawdown_recovery,
+    format_drawdown_days,
+    format_metric,
+    monthly_returns,
+    rolling_returns,
+)
 from engine.models import BacktestResult, BacktestSettings
 from engine.rules import apply_params, default_spec, eval_rule, extract_param_space, positions_from_flags, validate_spec
 from engine.strategy import RuleStrategy
@@ -359,3 +367,70 @@ def test_trade_return_stats():
     assert metrics["avg_win_return"] == pytest.approx(0.10)
     assert metrics["avg_loss_return"] == pytest.approx(-0.04)
     assert metrics["win_rate"] == pytest.approx(1 / 3)
+    assert math.isnan(metrics["avg_hold_days"])
+
+
+def test_drawdown_days_are_calendar_days_from_the_low_back_to_the_peak():
+    index = pd.to_datetime(["2020-01-02", "2020-01-03", "2020-01-06", "2020-01-13"])
+    equity = pd.DataFrame(
+        {
+            "equity": [100.0, 80.0, 90.0, 100.0],
+            "drawdown": [0.0, -0.2, -0.1, 0.0],
+            "position": [1, 1, 1, 1],
+            "close": [1, 1, 1, 1],
+        },
+        index=index,
+    )
+    trades = pd.DataFrame(
+        {
+            "entry_time": pd.to_datetime(["2020-01-03", "2020-01-06"]),
+            "exit_time": pd.to_datetime(["2020-01-06", "2020-01-16"]),
+            "pnl": [1.0, -1.0],
+            "return_pct": [0.01, -0.02],
+        }
+    )
+    metrics = compute_metrics(BacktestResult(equity, trades, BacktestSettings()))
+    assert metrics["drawdown_days"] == 10
+    assert metrics["drawdown_recovered"] is True
+    assert metrics["avg_hold_days"] == pytest.approx(6.5)
+    assert format_drawdown_days(metrics) == "10 days"
+    assert format_metric("avg_hold_days", metrics["avg_hold_days"]) == "6.5 days"
+
+
+def test_open_drawdown_counts_through_the_last_day():
+    index = pd.to_datetime(["2020-01-02", "2020-01-03", "2020-01-31"])
+    equity = pd.Series([100.0, 80.0, 90.0], index=index)
+    days, recovered = drawdown_recovery(equity)
+    assert days == 28
+    assert recovered is False
+    assert format_drawdown_days({"drawdown_days": days, "drawdown_recovered": recovered}) == "28 days, open"
+    flat = pd.Series([100.0, 101.0, 102.0], index=index)
+    assert drawdown_recovery(flat) == (0.0, True)
+
+
+def test_rolling_and_monthly_returns():
+    path = pd.Series(
+        [100.0, 110.0, 99.0, 108.9],
+        index=pd.to_datetime(["2020-01-02", "2020-01-31", "2020-02-28", "2020-03-31"]),
+    )
+    table = monthly_returns(path)
+    assert table.loc[2020, "Jan"] == pytest.approx(0.10)
+    assert table.loc[2020, "Feb"] == pytest.approx(-0.10)
+    assert table.loc[2020, "Mar"] == pytest.approx(0.10)
+    assert pd.isna(table.loc[2020, "Apr"])
+    months = table.loc[2020, ["Jan", "Feb", "Mar"]].astype(float)
+    assert float((1 + months).prod() - 1) == pytest.approx(table.loc[2020, "Year"])
+
+    anniversary = pd.Series([100.0, 133.1], index=pd.to_datetime(["2017-06-01", "2020-06-01"]))
+    rolled = rolling_returns(anniversary, 3)
+    assert len(rolled) == 1
+    assert rolled.iloc[0] == pytest.approx(0.10)
+    assert rolling_returns(anniversary, 10).empty
+    all_time = rolling_returns(anniversary, None)
+    assert list(all_time.index) == list(anniversary.index)
+    assert all_time.iloc[0] == pytest.approx(0.0)
+    assert all_time.iloc[-1] == pytest.approx(0.331)
+    early = pd.Series([100.0, 110.0], index=pd.to_datetime(["2019-06-03", "2020-06-02"]))
+    assert rolling_returns(early, 1).empty
+    held = average_hold_days(pd.DataFrame())
+    assert math.isnan(held)
